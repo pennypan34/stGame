@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { resolveControllerPad } from "../game/loop/gamepadControls";
 import { COURSE_IDS, getCourse } from "../sim/course/courses";
 import { DIFFICULTY_IDS, DIFFICULTY_LABEL, ENVIRONMENT_IDS, ENVIRONMENT_LABEL } from "../sim/environment";
 import type { SetupStep } from "../store/gameStore";
@@ -130,6 +131,11 @@ function CourseMiniMap({ courseId }: { courseId: (typeof COURSE_IDS)[number] }) 
   const def = useMemo(() => getCourse(courseId), [courseId]);
   const scale = 120 / 2800;
   const offsetY = (120 - 1800 * scale) / 2;
+  const hasSeparateFinish =
+    def.finishLine.left.x !== def.startLine.left.x ||
+    def.finishLine.left.y !== def.startLine.left.y ||
+    def.finishLine.right.x !== def.startLine.right.x ||
+    def.finishLine.right.y !== def.startLine.right.y;
 
   return (
     <svg className="mini-map" viewBox="0 0 120 120" aria-hidden>
@@ -141,6 +147,16 @@ function CourseMiniMap({ courseId }: { courseId: (typeof COURSE_IDS)[number] }) 
         stroke="#ffffff"
         strokeWidth="2"
       />
+      {hasSeparateFinish && (
+        <line
+          x1={def.finishLine.left.x * scale}
+          y1={def.finishLine.left.y * scale + offsetY}
+          x2={def.finishLine.right.x * scale}
+          y2={def.finishLine.right.y * scale + offsetY}
+          stroke="#9ff0c0"
+          strokeWidth="2"
+        />
+      )}
       {def.marks.map((mark, index) => (
         <g key={mark.id}>
           <circle cx={mark.position.x * scale} cy={mark.position.y * scale + offsetY} r="5" fill="#ff8a18" />
@@ -211,14 +227,16 @@ function ControllersStep() {
   return (
     <div className="controller-check">
       {activeBoatIds.map((boatId, index) => {
-        const pad = connected[index];
+        const { pad, localChannel } = resolveControllerPad(connected, index, activeBoatIds.length);
         return (
           <div key={boatId} className="controller-row">
             <strong>
               {index + 1}号船 · 通道{index + 1}
             </strong>
             {pad ? (
-              <span className="ok">已连接 {pad.id.slice(0, 28)} · 舵 {Math.round((pad.axes[0] ?? 0) * 100)}%</span>
+              <span className="ok">
+                已连接 {(pad.id ?? "手柄").slice(0, 28)} · 终端通道{localChannel + 1} · 舵 {Math.round((pad.axes[localChannel] ?? 0) * 100)}%
+              </span>
             ) : (
               <span className="fallback">未检测到手柄 · 使用键盘兜底（{["A/D", "←/→", "J/L", "小键盘4/6"][index]}）</span>
             )}

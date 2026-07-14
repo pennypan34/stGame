@@ -1,67 +1,38 @@
-import { useGameStore } from "../../store/gameStore";
-import type { OverlaySettings } from "../../game/types";
+import { Gauge, List, Pause, Play, Settings2 } from "lucide-react";
 import { FocusableButton } from "../../app/navigation/FocusableButton";
+import { useGameStore } from "../../store/gameStore";
 
-const overlayLabels: Record<keyof OverlaySettings, string> = {
-  wind: "风",
-  current: "流",
-  tracks: "航迹",
-  laylines: "Layline",
-  noGoZone: "禁航角"
+type CoachControlsProps = {
+  onRestartSetup: () => void;
 };
 
-export function CoachControls() {
-  const overlays = useGameStore((state) => state.overlays);
-  const activeBoatIds = useGameStore((state) => state.activeBoatIds);
-  const timeScale = useGameStore((state) => state.timeScale);
-  const setBoatCount = useGameStore((state) => state.setBoatCount);
+const SPEED_STEPS = [1, 2, 4];
+
+export function CoachControls({ onRestartSetup }: CoachControlsProps) {
   const setView = useGameStore((state) => state.setView);
-  const setupRule10Demo = useGameStore((state) => state.setupRule10Demo);
-  const toggleOverlay = useGameStore((state) => state.toggleOverlay);
+  const timeScale = useGameStore((state) => state.timeScale);
+  const setTimeScale = useGameStore((state) => state.setTimeScale);
   const togglePause = useGameStore((state) => state.togglePause);
-  const toggleSlowMotion = useGameStore((state) => state.toggleSlowMotion);
-  const restart = useGameStore((state) => state.restart);
+  const racePhase = useGameStore((state) => state.race.phase);
+  const isPaused = racePhase === "paused";
+  const speedIndex = SPEED_STEPS.indexOf(timeScale);
+  const nextSpeed = SPEED_STEPS[(speedIndex + 1) % SPEED_STEPS.length] ?? 1;
 
   return (
     <section className="coach-controls">
-      <FocusableButton type="button" onClick={togglePause} autoFocus>
-        暂停/继续
+      <FocusableButton type="button" className="icon-button" onClick={togglePause} aria-label={isPaused ? "继续比赛" : "暂停比赛"} title={isPaused ? "继续比赛" : "暂停比赛"} autoFocus>
+        {isPaused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
       </FocusableButton>
-      <FocusableButton type="button" onClick={toggleSlowMotion}>
-        {timeScale === 1 ? "慢放" : "正常速度"}
+      <FocusableButton type="button" className="icon-button" onClick={() => setTimeScale(nextSpeed)} aria-label={`速度 ${timeScale} 倍`} title="切换速度">
+        <Gauge aria-hidden="true" />
+        <span className="speed-badge">{timeScale}x</span>
       </FocusableButton>
-      <FocusableButton type="button" onClick={restart}>
-        重开
+      <FocusableButton type="button" className="icon-button" onClick={onRestartSetup} aria-label="重新配置比赛" title="重新配置比赛">
+        <Settings2 aria-hidden="true" />
       </FocusableButton>
-      <FocusableButton type="button" onClick={() => setView("setup")}>
-        设置
+      <FocusableButton type="button" className="icon-button" onClick={() => setView("results")} aria-label="查看结果" title="查看结果">
+        <List aria-hidden="true" />
       </FocusableButton>
-      <FocusableButton type="button" onClick={() => setView("results")}>
-        结果
-      </FocusableButton>
-      <FocusableButton type="button" onClick={setupRule10Demo}>
-        规则10
-      </FocusableButton>
-      <div className="boat-count">
-        {[1, 2, 3, 4].map((count) => (
-          <FocusableButton
-            key={count}
-            type="button"
-            className={activeBoatIds.length === count ? "active" : ""}
-            onClick={() => setBoatCount(count)}
-          >
-            {count}船
-          </FocusableButton>
-        ))}
-      </div>
-      <div className="overlay-toggles">
-        {(Object.keys(overlayLabels) as Array<keyof OverlaySettings>).map((key) => (
-          <label key={key}>
-            <input type="checkbox" checked={overlays[key]} onChange={() => toggleOverlay(key)} />
-            {overlayLabels[key]}
-          </label>
-        ))}
-      </div>
     </section>
   );
 }

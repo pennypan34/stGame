@@ -20,6 +20,7 @@ export const THEME = {
   },
   wind: {
     arrowColor: "#c5f6ff",
+    arrowHeadColor: "#dff8ff",
     arrowAlpha: 0.34,
     arrowWidth: 7,
     arrowLength: 74
@@ -41,13 +42,6 @@ export const THEME = {
     innerAlphaGust: 0.18,
     strokeAlpha: 0.4,
     strokeWidth: 3
-  },
-  current: {
-    zoneFillColor: "#2ea8ff",
-    zoneFillAlpha: 0.07,
-    arrowColor: "#49c9ff",
-    arrowAlpha: 0.42,
-    arrowWidth: 7
   },
   boat: {
     hullFillColor: "#f6fbff",
@@ -80,8 +74,13 @@ export const THEME = {
     markCoreStrokeColor: "#c94e08",
     markCoreStrokeWidth: 5,
     markGlintColor: "#ffbb4d",
+    legLineColor: "#fff0a8",
+    legLineAlpha: 0.34,
+    legLineWidth: 3,
     labelColor: "#ffffff",
-    labelFontSize: 26
+    labelFontSize: 26,
+    legLabelColor: "#fff7c2",
+    legLabelFontSize: 24
   },
   tactical: {
     trackAlpha: 0.58,

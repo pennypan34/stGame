@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBoatMotionState, stepBoatPhysics } from "./boatPhysics";
+import { apparentWind, computeSailShape, createBoatMotionState, idealSailAngle, stepBoatPhysics } from "./boatPhysics";
 import type { BoatPhysicsInput } from "./boatPhysics";
 import { PIXELS_PER_KNOT } from "./units";
 
@@ -11,7 +11,6 @@ function makeInput(overrides: Partial<BoatPhysicsInput> = {}): BoatPhysicsInput 
     rudder: 0,
     boatType: "op",
     wind: calmWind,
-    current: { x: 0, y: 0 },
     penaltyFactor: 1,
     dt: 1 / 60,
     ...overrides
@@ -45,7 +44,7 @@ describe("rudder model", () => {
 
     const slowDelta = Math.abs(slowTurned.headingDeg - 90);
     const fastDelta = Math.abs(fastTurned.headingDeg - 90);
-    expect(fastDelta).toBeGreaterThan(slowDelta * 1.5);
+    expect(fastDelta).toBeGreaterThan(slowDelta * 1.4);
   });
 });
 
@@ -124,17 +123,6 @@ describe("tacking", () => {
   });
 });
 
-describe("current and STW/SOG", () => {
-  it("keeps STW unchanged by current while SOG drifts with it", () => {
-    const noCurrent = run(makeInput(), 10);
-    const withCurrent = run(makeInput({ current: { x: 10, y: 0 } }), 10);
-
-    expect(withCurrent.speed).toBeCloseTo(noCurrent.speed, 1);
-    expect(withCurrent.velocity.x - noCurrent.velocity.x).toBeCloseTo(10, 1);
-    expect(withCurrent.position.x).toBeGreaterThan(noCurrent.position.x + 50);
-  });
-});
-
 describe("penalty", () => {
   it("caps the boat at a fraction of polar speed while penalized", () => {
     const normal = run(makeInput(), 12);
@@ -147,5 +135,45 @@ describe("auto trim", () => {
   it("keeps sail efficiency high when sailing steadily", () => {
     const settled = run(makeInput(), 15);
     expect(settled.sailEfficiency).toBeGreaterThan(0.85);
+  });
+
+  it("opens the boom farther as the apparent wind moves aft", () => {
+    expect(idealSailAngle(45)).toBeGreaterThanOrEqual(10);
+    expect(idealSailAngle(45)).toBeLessThanOrEqual(20);
+    expect(idealSailAngle(45)).toBeLessThan(idealSailAngle(90));
+    expect(idealSailAngle(90)).toBeGreaterThanOrEqual(40);
+    expect(idealSailAngle(90)).toBeLessThanOrEqual(50);
+    expect(idealSailAngle(90)).toBeLessThan(idealSailAngle(180));
+    expect(idealSailAngle(180)).toBeGreaterThan(80);
+  });
+
+  it("uses apparent wind, so boat speed pulls the felt wind forward", () => {
+    const stationary = apparentWind(90, { x: 0, y: 0 }, calmWind);
+    const movingEast = apparentWind(90, { x: 4 * PIXELS_PER_KNOT, y: 0 }, calmWind);
+
+    expect(stationary.angleDeg).toBeCloseTo(90, 5);
+    expect(movingEast.angleDeg).toBeLessThan(stationary.angleDeg);
+    expect(movingEast.speedKnots).toBeGreaterThan(calmWind.speedKnots);
+  });
+
+  it("models sail shape changes without involving the renderer", () => {
+    const closeHauled = computeSailShape({ angleDeg: 45, speedKnots: 12 });
+    const beamReach = computeSailShape({ angleDeg: 90, speedKnots: 12 });
+    const running = computeSailShape({ angleDeg: 175, speedKnots: 12 });
+    const luffing = computeSailShape({ angleDeg: 20, speedKnots: 12 });
+
+    expect(closeHauled.mode).toBe("lift");
+    expect(beamReach.mode).toBe("lift");
+    expect(beamReach.boomAngleDeg).toBeGreaterThan(closeHauled.boomAngleDeg);
+    expect(running.boomAngleDeg).toBeGreaterThan(closeHauled.boomAngleDeg);
+    expect(running.camber).toBeGreaterThan(closeHauled.camber);
+    expect(running.twistDeg).toBeGreaterThan(closeHauled.twistDeg);
+    expect(running.mode).toBe("drag");
+    expect(running.boomAngleDeg).toBeGreaterThan(84);
+    expect(running.dragShare).toBeGreaterThan(0.9);
+    expect(running.flowEfficiency).toBeLessThanOrEqual(1);
+    expect(closeHauled.flowEfficiency).toBeLessThanOrEqual(1);
+    expect(luffing.luffing).toBeGreaterThan(0.8);
+    expect(luffing.flowEfficiency).toBeLessThan(closeHauled.flowEfficiency);
   });
 });

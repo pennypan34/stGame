@@ -14,7 +14,7 @@ export type BoatState = {
   headingDeg: number;
   /** Speed through water (STW) in px/s. */
   speed: number;
-  /** Speed over ground (SOG) vector in px/s, includes current. */
+  /** Speed over ground (SOG) vector in px/s. */
   velocity: Vec2;
   rudderAngleDeg: number;
   sailAngleDeg: number;
@@ -29,6 +29,8 @@ export type BoatState = {
   /** Accumulated bearing sweep (deg) around the current target mark; sign encodes direction. */
   markSweepDeg: number;
   lastMarkBearingDeg?: number;
+  markEntrySide?: "left" | "right";
+  touchedMarkId?: string;
   tackCount: number;
   penaltyCount: number;
   penaltyUntilMs?: number;
@@ -69,13 +71,6 @@ export type WindZoneState = {
   phaseSpeed: number;
 };
 
-export type CurrentZone = {
-  id: string;
-  center: Vec2;
-  radius: number;
-  vector: Vec2;
-};
-
 export type RacePhase = "prestart" | "racing" | "finished" | "paused";
 
 export type RaceState = {
@@ -110,6 +105,7 @@ export type AppView =
   | "lessonBoat"
   | "lessonWind"
   | "lessonRules"
+  | "lessonRaceFlow"
   | "setup"
   | "race"
   | "results";
@@ -121,7 +117,6 @@ export type LineSegment = {
 
 export type OverlaySettings = {
   wind: boolean;
-  current: boolean;
   tracks: boolean;
   laylines: boolean;
   noGoZone: boolean;

@@ -1,5 +1,6 @@
-import type { BoatState, CurrentZone, OverlaySettings, RaceState, WindState, WindZoneState } from "./types";
+import type { BoatState, OverlaySettings, RaceState, WindState, WindZoneState } from "./types";
 import type { WindFieldConfig } from "../sim/wind/windField";
+import { PIXELS_PER_KNOT } from "../sim/boat/units";
 
 export const WORLD = {
   width: 2800,
@@ -8,7 +9,7 @@ export const WORLD = {
 
 export const INITIAL_RACE: RaceState = {
   phase: "prestart",
-  countdownMs: 30_000,
+  countdownMs: 20_000,
   elapsedMs: 0,
   ruleEvents: [],
   events: [],
@@ -21,10 +22,10 @@ export const INITIAL_WIND: WindState = {
   oscillationDeg: 0
 };
 
+const INITIAL_BOAT_SPEED = 3.2 * PIXELS_PER_KNOT;
 
 export const INITIAL_OVERLAYS: OverlaySettings = {
   wind: true,
-  current: true,
   tracks: true,
   laylines: true,
   noGoZone: true
@@ -33,34 +34,11 @@ export const INITIAL_OVERLAYS: OverlaySettings = {
 export const INITIAL_BOATS: BoatState[] = [
   {
     id: "red",
-    name: "玩家 1",
+    name: "红船",
     color: "#ff533d",
     position: { x: 1260, y: 1670 },
     headingDeg: 350,
-    speed: 0,
-    velocity: { x: 0, y: 0 },
-    boatType: "op",
-    rudderAngleDeg: 0,
-    sailAngleDeg: 0,
-    twaDeg: 0,
-    tack: "starboard",
-    tackTimerSec: 0,
-    sailEfficiency: 1,
-    legIndex: 0,
-    finished: false,
-    startStatus: "prestart",
-    markSweepDeg: 0,
-    tackCount: 0,
-    penaltyCount: 0,
-    track: []
-  },
-  {
-    id: "blue",
-    name: "玩家 2",
-    color: "#1597ff",
-    position: { x: 1540, y: 1670 },
-    headingDeg: 10,
-    speed: 0,
+    speed: INITIAL_BOAT_SPEED,
     velocity: { x: 0, y: 0 },
     boatType: "op",
     rudderAngleDeg: 0,
@@ -79,11 +57,11 @@ export const INITIAL_BOATS: BoatState[] = [
   },
   {
     id: "green",
-    name: "玩家 3",
+    name: "绿船",
     color: "#43d17a",
     position: { x: 1120, y: 1720 },
     headingDeg: 342,
-    speed: 0,
+    speed: INITIAL_BOAT_SPEED,
     velocity: { x: 0, y: 0 },
     boatType: "op",
     rudderAngleDeg: 0,
@@ -102,11 +80,34 @@ export const INITIAL_BOATS: BoatState[] = [
   },
   {
     id: "yellow",
-    name: "玩家 4",
+    name: "黄船",
     color: "#ffd34d",
     position: { x: 1680, y: 1720 },
     headingDeg: 18,
-    speed: 0,
+    speed: INITIAL_BOAT_SPEED,
+    velocity: { x: 0, y: 0 },
+    boatType: "op",
+    rudderAngleDeg: 0,
+    sailAngleDeg: 0,
+    twaDeg: 0,
+    tack: "starboard",
+    tackTimerSec: 0,
+    sailEfficiency: 1,
+    legIndex: 0,
+    finished: false,
+    startStatus: "prestart",
+    markSweepDeg: 0,
+    tackCount: 0,
+    penaltyCount: 0,
+    track: []
+  },
+  {
+    id: "blue",
+    name: "蓝船",
+    color: "#1597ff",
+    position: { x: 1540, y: 1670 },
+    headingDeg: 10,
+    speed: INITIAL_BOAT_SPEED,
     velocity: { x: 0, y: 0 },
     boatType: "op",
     rudderAngleDeg: 0,
@@ -166,12 +167,6 @@ export const INITIAL_WIND_ZONES: WindZoneState[] = [
     phase: 0.7,
     phaseSpeed: 0.1
   }
-];
-
-export const INITIAL_CURRENTS: CurrentZone[] = [
-  { id: "left-river", center: { x: 650, y: 960 }, radius: 430, vector: { x: 11, y: -3 } },
-  { id: "right-counter", center: { x: 2200, y: 1050 }, radius: 510, vector: { x: -9, y: 6 } },
-  { id: "mark-current", center: { x: 1500, y: 410 }, radius: 360, vector: { x: 5, y: 8 } }
 ];
 
 export const INITIAL_WIND_FIELD: WindFieldConfig = {

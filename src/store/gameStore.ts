@@ -1,15 +1,17 @@
 import { create } from "zustand";
-import { INITIAL_CURRENTS, INITIAL_OVERLAYS, INITIAL_WIND, INITIAL_WIND_FIELD } from "../game/constants";
-import type { AppView, BoatControls, BoatId, BoatState, CurrentZone, OverlaySettings, RaceState, WindState, WindZoneState } from "../game/types";
+import { INITIAL_OVERLAYS, INITIAL_WIND, INITIAL_WIND_FIELD } from "../game/constants";
+import type { AppView, BoatControls, BoatId, BoatState, OverlaySettings, RaceState, WindState, WindZoneState } from "../game/types";
 import { splitFrameIntoSteps } from "../sim/loop";
 import { SIM_DT, cloneInitialBoats, cloneInitialRace, stepSimulation } from "../sim/simulation";
 import { getCourse } from "../sim/course/courses";
 import type { CourseDefinition, CourseId } from "../sim/course/types";
-import { buildEnvironment } from "../sim/environment";
+import { buildEnvironment, buildWindZones } from "../sim/environment";
 import { createRulesEngineState } from "../sim/rules/rulesEngine";
 import type { RulesEngineState } from "../sim/rules/rulesEngine";
-import type { DifficultyId, EnvironmentId } from "../sim/environment";
+import type { DifficultyId, EnvironmentId, WindZoneCount } from "../sim/environment";
 import type { WindFieldConfig } from "../sim/wind/windField";
+import { DEFAULT_GAMEPAD_STEERING, sanitizeGamepadSteeringSettings } from "../game/loop/gamepadTuning";
+import type { GamepadSteeringSettings } from "../game/loop/gamepadTuning";
 
 export type SetupStep = "players" | "course" | "difficulty" | "environment" | "controllers";
 
@@ -22,14 +24,15 @@ type GameStore = {
   course: CourseDefinition;
   difficulty: DifficultyId;
   environment: EnvironmentId;
+  windZoneCount: WindZoneCount;
   windField: WindFieldConfig;
   wind: WindState;
   windZones: WindZoneState[];
-  currents: CurrentZone[];
   rulesState: RulesEngineState;
   overlays: OverlaySettings;
   hudVisible: boolean;
   timeScale: number;
+  gamepadSteering: GamepadSteeringSettings;
   controls: Record<BoatId, BoatControls>;
   tick: (dt: number) => void;
   setView: (view: AppView) => void;
@@ -38,17 +41,20 @@ type GameStore = {
   setCourse: (courseId: CourseId) => void;
   setDifficulty: (difficulty: DifficultyId) => void;
   setEnvironment: (environment: EnvironmentId) => void;
+  setWindZoneCount: (count: WindZoneCount) => void;
   startRace: () => void;
   setControl: (boatId: BoatId, control: Partial<BoatControls>) => void;
   setupRule10Demo: () => void;
   toggleOverlay: (key: keyof OverlaySettings) => void;
   toggleHud: () => void;
   togglePause: () => void;
-  toggleSlowMotion: () => void;
+  setTimeScale: (timeScale: number) => void;
+  setGamepadSteering: (settings: Partial<GamepadSteeringSettings>) => void;
   restart: () => void;
 };
 
-const BOAT_ORDER: BoatId[] = ["red", "blue", "green", "yellow"];
+const BOAT_ORDER: BoatId[] = ["red", "green", "yellow", "blue"];
+const NORMAL_TIME_SCALE = 1;
 
 function createEmptyControls(): Record<BoatId, BoatControls> {
   return {
@@ -64,20 +70,21 @@ let frameAccumulator = 0;
 export const useGameStore = create<GameStore>((set, get) => ({
   view: "home",
   setupStep: "players",
-  boats: cloneInitialBoats(getCourse("io")),
-  activeBoatIds: ["red", "blue"],
+  boats: cloneInitialBoats(getCourse("windwardLeeward")),
+  activeBoatIds: ["red", "green", "yellow", "blue"],
   race: cloneInitialRace(),
-  course: getCourse("io"),
+  course: getCourse("windwardLeeward"),
   difficulty: "standard",
   environment: "combo",
+  windZoneCount: 3,
   windField: INITIAL_WIND_FIELD,
   wind: { ...INITIAL_WIND },
   windZones: [],
-  currents: INITIAL_CURRENTS,
   rulesState: createRulesEngineState(),
   overlays: { ...INITIAL_OVERLAYS },
   hudVisible: true,
-  timeScale: 1,
+  timeScale: NORMAL_TIME_SCALE,
+  gamepadSteering: DEFAULT_GAMEPAD_STEERING,
   controls: createEmptyControls(),
   tick: (frameDt) => {
     const state = get();
@@ -86,8 +93,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
 
-    // Slow motion feeds less wall time into the accumulator; every simulated
-    // tick still advances exactly SIM_DT so results stay deterministic.
+    // Time scaling feeds more or less wall time into the accumulator; every
+    // simulated tick still advances exactly SIM_DT so results stay deterministic.
     const { steps, remainder } = splitFrameIntoSteps(frameAccumulator, frameDt * state.timeScale, SIM_DT);
     frameAccumulator = remainder;
     if (steps === 0) return;
@@ -100,7 +107,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       windField: state.windField,
       wind: state.wind,
       windZones: state.windZones,
-      currents: state.currents,
       rulesState: state.rulesState
     };
     for (let step = 0; step < steps; step += 1) {
@@ -118,22 +124,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setCourse: (courseId) => set({ course: getCourse(courseId) }),
   setDifficulty: (difficulty) => set({ difficulty }),
   setEnvironment: (environment) => set({ environment }),
+  setWindZoneCount: (windZoneCount) => set({ windZoneCount }),
   startRace: () => {
     const state = get();
-    const env = buildEnvironment(state.difficulty, state.environment);
+    const env = buildEnvironment("standard", "oscillating");
+    const windZones = buildWindZones(state.windZoneCount);
+    const windField = { ...env.windField, zones: windZones };
     frameAccumulator = 0;
     set({
       view: "race",
       boats: cloneInitialBoats(state.course),
       race: { ...cloneInitialRace(), countdownMs: env.countdownMs },
-      windField: env.windField,
-      wind: { ...INITIAL_WIND, speedKnots: env.windField.baseSpeedKnots },
-      windZones: env.windField.zones.map((zone) => ({ ...zone, bounds: { ...zone.bounds } })),
-      currents: env.currents,
+      windField,
+      wind: { ...INITIAL_WIND, speedKnots: windField.baseSpeedKnots },
+      windZones: windZones.map((zone) => ({ ...zone, bounds: { ...zone.bounds } })),
       overlays: env.overlays,
       rulesState: createRulesEngineState(),
       controls: createEmptyControls(),
-      timeScale: 1
+      timeScale: NORMAL_TIME_SCALE
     });
   },
   setControl: (boatId, control) => {
@@ -154,7 +162,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       race: { ...cloneInitialRace(), phase: "racing", countdownMs: 0 },
       windField: env.windField,
       windZones: [],
-      currents: [],
       overlays: { ...env.overlays, laylines: false, noGoZone: false },
       boats: cloneInitialBoats(state.course).map((boat) => {
         if (boat.id === "red") {
@@ -166,7 +173,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return boat;
       }),
       rulesState: createRulesEngineState(),
-      controls: createEmptyControls()
+      controls: createEmptyControls(),
+      timeScale: NORMAL_TIME_SCALE
     });
   },
   toggleOverlay: (key) => set((state) => ({ overlays: { ...state.overlays, [key]: !state.overlays[key] } })),
@@ -179,7 +187,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     }));
   },
-  toggleSlowMotion: () => set((state) => ({ timeScale: state.timeScale === 1 ? 0.5 : 1 })),
+  setTimeScale: (timeScale) => set({ timeScale: Math.max(1, Math.min(4, timeScale)) }),
+  setGamepadSteering: (settings) =>
+    set((state) => ({
+      gamepadSteering: sanitizeGamepadSteeringSettings({ ...state.gamepadSteering, ...settings })
+    })),
   restart: () => {
     const state = get();
     const env = buildEnvironment(state.difficulty, state.environment);
@@ -189,7 +201,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       race: { ...cloneInitialRace(), countdownMs: env.countdownMs },
       rulesState: createRulesEngineState(),
       controls: createEmptyControls(),
-      timeScale: 1
+      timeScale: NORMAL_TIME_SCALE
     });
   }
 }));

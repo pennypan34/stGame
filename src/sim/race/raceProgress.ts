@@ -1,5 +1,5 @@
 import type { BoatState, LineSegment, RaceEvent, Vec2 } from "../../game/types";
-import { distance } from "../../game/utils/math";
+import { distance, headingToVector } from "../../game/utils/math";
 import type { CourseDefinition } from "../course/types";
 import { currentTarget, isOnFinalLeg } from "../course/progress";
 
@@ -19,25 +19,32 @@ export type RaceProgressResult = {
 
 /** Radius around a mark inside which the rounding sweep is tracked. */
 const ROUNDING_TRACK_RADIUS = 170;
-/** Bearing sweep (degrees) required to count as having rounded the mark. */
-const ROUNDING_SWEEP_DEG = 90;
+const MARK_TOUCH_RADIUS = 23;
+/** Minimal bearing sweep that proves the boat passed the mark on the required side. */
+const ROUNDING_PASS_SWEEP_DEG = 45;
+const BOW_OFFSET_PX = 48;
+const STERN_OFFSET_PX = 54;
+const HULL_HALF_WIDTH_PX = 24;
+const MARK_TOUCH_PENALTY_MS = 3000;
 
 export function updateBoatRace({ boat, prevPosition, course, elapsedMs, startSignal }: RaceProgressInput): RaceProgressResult {
   const events: RaceEvent[] = [];
   let next = boat;
+  const prevBow = bowPosition(next, prevPosition);
+  const bow = bowPosition(next);
 
   const emit = (kind: RaceEvent["kind"], message: string) => {
     events.push({ id: `${kind}-${boat.id}-${Math.round(elapsedMs)}`, timeMs: elapsedMs, kind, boatId: boat.id, message });
   };
 
   // --- starting signal: anyone on the course side is OCS ---
-  if (startSignal && next.startStatus === "prestart" && isOnCourseSide(next.position, course.startLine)) {
+  if (startSignal && next.startStatus === "prestart" && isOnCourseSide(bow, course.startLine)) {
     next = { ...next, startStatus: "ocs" };
     emit("ocs", `${boat.name} 抢航（OCS），必须回到起航线后重新起航`);
   }
 
   if (next.startStatus === "ocs") {
-    if (!isOnCourseSide(next.position, course.startLine)) {
+    if (isEntireHullOnPrestartSide(next, course.startLine)) {
       next = { ...next, startStatus: "prestart" };
       emit("ocs-cleared", `${boat.name} 已回到起航线后，可以重新起航`);
     }
@@ -45,14 +52,14 @@ export function updateBoatRace({ boat, prevPosition, course, elapsedMs, startSig
   }
 
   if (next.startStatus === "prestart") {
-    if (!startSignal && crossesLineUpward(prevPosition, next.position, course.startLine)) {
+    if (!startSignal && crossesLineUpward(prevBow, bow, course.startLine)) {
       next = { ...next, startStatus: "started" };
       emit("start", `${boat.name} 起航`);
     }
     return { boat: next, events };
   }
 
-  // --- started: mark rounding with direction check ---
+  // --- started: mark rounding with normal race-side check ---
   if (next.finished) return { boat: next, events };
 
   const target = currentTarget(course, next.legIndex);
@@ -60,31 +67,103 @@ export function updateBoatRace({ boat, prevPosition, course, elapsedMs, startSig
     const mark = target.mark;
     const dist = distance(next.position, mark.position);
 
+    if (dist <= MARK_TOUCH_RADIUS) {
+      const alreadyPenalized = Boolean(next.penaltyUntilMs && next.penaltyUntilMs > elapsedMs);
+      next = {
+        ...next,
+        markSweepDeg: 0,
+        lastMarkBearingDeg: undefined,
+        markEntrySide: undefined,
+        touchedMarkId: mark.id
+      };
+      if (!alreadyPenalized) {
+        next = {
+          ...next,
+          speed: next.speed * 0.25,
+          penaltyCount: next.penaltyCount + 1,
+          penaltyUntilMs: elapsedMs + MARK_TOUCH_PENALTY_MS
+        };
+        emit("rule", `${boat.name} 碰到 ${mark.label}，绕标不算，需重新按规定一侧绕标`);
+      }
+      return { boat: next, events };
+    }
+
     if (dist <= ROUNDING_TRACK_RADIUS) {
       const bearing = bearingDeg(mark.position, next.position);
       const lastBearing = next.lastMarkBearingDeg;
       const delta = lastBearing === undefined ? 0 : signedAngleDelta(lastBearing, bearing);
-      next = { ...next, markSweepDeg: next.markSweepDeg + delta, lastMarkBearingDeg: bearing };
+      next = {
+        ...next,
+        markSweepDeg: next.markSweepDeg + delta,
+        lastMarkBearingDeg: bearing,
+        markEntrySide: next.markEntrySide ?? sideOfMark(next.position, mark.position),
+        touchedMarkId: next.touchedMarkId === mark.id ? mark.id : undefined
+      };
     } else if (next.lastMarkBearingDeg !== undefined) {
       const requiredSign = mark.rounding === "port" ? -1 : 1;
-      const rounded = next.markSweepDeg * requiredSign >= ROUNDING_SWEEP_DEG;
+      const expectedEntrySide = mark.rounding === "starboard" ? "left" : "right";
+      const expectedExitSide = mark.rounding === "starboard" ? "right" : "left";
+      const exitedRequiredSide = sideOfMark(next.position, mark.position) === expectedExitSide;
+      const enteredRequiredSide = next.markEntrySide === expectedEntrySide;
+      const rounded =
+        enteredRequiredSide && exitedRequiredSide && next.markSweepDeg * requiredSign >= ROUNDING_PASS_SWEEP_DEG && next.touchedMarkId !== mark.id;
       if (rounded) {
-        next = { ...next, legIndex: next.legIndex + 1, markSweepDeg: 0, lastMarkBearingDeg: undefined };
+        next = {
+          ...next,
+          legIndex: next.legIndex + 1,
+          markSweepDeg: 0,
+          lastMarkBearingDeg: undefined,
+          markEntrySide: undefined,
+          touchedMarkId: undefined
+        };
         emit("mark", `${boat.name} 绕过 ${mark.label}`);
       } else {
-        next = { ...next, markSweepDeg: 0, lastMarkBearingDeg: undefined };
+        next = { ...next, markSweepDeg: 0, lastMarkBearingDeg: undefined, markEntrySide: undefined, touchedMarkId: undefined };
       }
     }
     return { boat: next, events };
   }
 
   // --- final leg: finish crossing ---
-  if (isOnFinalLeg(course, next.legIndex) && crossesLineDownward(prevPosition, next.position, course.finishLine)) {
+  if (isOnFinalLeg(course, next.legIndex) && crossesLine(prevPosition, next.position, course.finishLine)) {
     next = { ...next, finished: true };
     emit("finish", `${boat.name} 冲过终点`);
   }
 
   return { boat: next, events };
+}
+
+function bowPosition(boat: BoatState, position = boat.position): Vec2 {
+  const forward = headingToVector(boat.headingDeg);
+  return {
+    x: position.x + forward.x * BOW_OFFSET_PX,
+    y: position.y + forward.y * BOW_OFFSET_PX
+  };
+}
+
+function hullPoints(boat: BoatState): Vec2[] {
+  const forward = headingToVector(boat.headingDeg);
+  const rad = (boat.headingDeg * Math.PI) / 180;
+  const right = { x: Math.cos(rad), y: Math.sin(rad) };
+  const localPoints = [
+    { x: 0, y: -BOW_OFFSET_PX },
+    { x: HULL_HALF_WIDTH_PX, y: 38 },
+    { x: 0, y: STERN_OFFSET_PX },
+    { x: -HULL_HALF_WIDTH_PX, y: 38 }
+  ];
+
+  return localPoints.map((point) => ({
+    x: boat.position.x + right.x * point.x - forward.x * point.y,
+    y: boat.position.y + right.y * point.x - forward.y * point.y
+  }));
+}
+
+function isEntireHullOnPrestartSide(boat: BoatState, line: LineSegment): boolean {
+  return hullPoints(boat).every((point) => !isOnCourseSide(point, line));
+}
+
+function sideOfMark(position: Vec2, mark: Vec2): "left" | "right" {
+  return position.x < mark.x ? "left" : "right";
 }
 
 /** Course side is above the line (marks are upwind of the start). */
@@ -110,6 +189,10 @@ function crossesLineUpward(prev: Vec2, pos: Vec2, line: LineSegment): boolean {
 function crossesLineDownward(prev: Vec2, pos: Vec2, line: LineSegment): boolean {
   const y = lineYAt(line);
   return prev.y <= y && pos.y > y && withinLineSpan(pos, line);
+}
+
+function crossesLine(prev: Vec2, pos: Vec2, line: LineSegment): boolean {
+  return (crossesLineUpward(prev, pos, line) || crossesLineDownward(prev, pos, line)) && withinLineSpan(pos, line);
 }
 
 function bearingDeg(from: Vec2, to: Vec2): number {
